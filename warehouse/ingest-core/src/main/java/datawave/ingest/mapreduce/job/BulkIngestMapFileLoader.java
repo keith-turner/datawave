@@ -33,11 +33,13 @@ import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.security.tokens.PasswordToken;
 import org.apache.accumulo.core.clientImpl.ClientContext;
+import org.apache.accumulo.core.data.LoadPlan;
 import org.apache.accumulo.core.manager.thrift.ManagerClientService;
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
 import org.apache.accumulo.core.master.thrift.TableInfo;
 import org.apache.accumulo.core.rpc.ThriftUtil;
 import org.apache.accumulo.core.rpc.clients.ThriftClientTypes;
+import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileChecksum;
@@ -66,6 +68,8 @@ import com.google.common.collect.Lists;
 import datawave.ingest.data.TypeRegistry;
 import datawave.ingest.mapreduce.StandaloneStatusReporter;
 import datawave.util.cli.PasswordConverter;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
  * A processor whose job is to watch for completed Bulk Ingest jobs and bring the map files produced by them online in accumulo. This class attempts to bring
@@ -911,6 +915,7 @@ public final class BulkIngestMapFileLoader implements Runnable {
                 String failuresDir = mapFilesDir + "/failures/" + tableName;
                 Path failuresPath = new Path(failuresDir);
                 FileSystem fileSystem = FileSystem.get(srcHdfs, new Configuration());
+                // TODO bulk v2 does not have a failures dir, need to remove this code eventually.
                 if (fileSystem.exists(failuresPath)) {
                     log.fatal("Cannot bring map files online because a failures directory already exists: " + failuresDir);
                     throw new IOException("Cannot bring map files online because a failures directory already exists: " + failuresDir);
@@ -919,7 +924,21 @@ public final class BulkIngestMapFileLoader implements Runnable {
 
                 // import the directory
                 log.info("Bringing Map Files online for " + tableName);
-                accumuloClient.tableOperations().importDirectory(tableName, tableDir.toString(), failuresDir, false);
+
+                // read in the load plan for each file and merge them all into a single load plan
+                var builder = LoadPlan.builder();
+
+                // TODO need to use a constant of the load plan file suffix
+                for (var status : fileSystem.listStatus(tableDir, p -> p.getName().endsWith(".lp"))) {
+                    try (var input = fileSystem.open(status.getPath())) {
+                        String lpJson = IOUtils.toString(input, UTF_8);
+                        builder.addPlan(LoadPlan.fromJson(lpJson));
+                    }
+                }
+
+                LoadPlan loadPlan = builder.build();
+
+                accumuloClient.tableOperations().importDirectory(tableDir.toString()).to(tableName).plan(loadPlan).load();
                 log.info("Completed bringing map files online for " + tableName);
                 validateComplete();
             } catch (Exception e) {
@@ -997,7 +1016,7 @@ public final class BulkIngestMapFileLoader implements Runnable {
 
         private void validateComplete() throws IOException {
             FileSystem fileSystem = FileSystem.get(srcHdfs, new Configuration());
-            if (fileSystem.listStatus(tableDir).length > 0) {
+            if (fileSystem.listStatus(tableDir, p->!p.getName().endsWith(".lp")).length > 0) {
                 log.fatal("Failed to completely import " + tableDir);
                 throw new IOException("Failed to completely import " + tableDir);
             }

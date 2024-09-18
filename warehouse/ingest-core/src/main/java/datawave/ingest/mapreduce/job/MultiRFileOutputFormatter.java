@@ -5,10 +5,12 @@ import static org.apache.accumulo.core.conf.Property.TABLE_CRYPTO_PREFIX;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -280,9 +282,8 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
             if (filename != null) {
                 writer.close();
 
-                // TODO need to get tablet splits
-                SortedSet<Text> tableSplits = new TreeSet<>();
-                LoadPlan.SplitResolver splitResolver = LoadPlan.SplitResolver.from(tableSplits);
+                // TODO is this a subset of the tablets splits? if so how does that subset relate to the data in the file?
+                LoadPlan.SplitResolver splitResolver = LoadPlan.SplitResolver.from(getSplits(table));
 
                 // compute the load plan for the rfile
                 String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
@@ -671,6 +672,19 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
                 return writer;
             }
         };
+    }
+
+    private final Map<String, SortedSet<Text>> splitsCache = new HashMap<>();
+
+    private SortedSet<Text> getSplits(String tableName) {
+        // TODO what are the implications of this cache on memory?  is there another cache below this?  want to avoid resorting the data on each request, not sure if this is useful though.
+        return splitsCache.computeIfAbsent(tableName, tn-> {
+            try {
+                return new TreeSet<>(SplitsFile.getSplits(conf, tableName));
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
     }
 
     /**
