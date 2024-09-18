@@ -1,5 +1,6 @@
 package datawave.ingest.mapreduce.job;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.accumulo.core.conf.Property.TABLE_CRYPTO_PREFIX;
 
 import java.io.DataOutputStream;
@@ -11,6 +12,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
@@ -20,6 +23,7 @@ import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
 import org.apache.accumulo.core.data.ArrayByteSequence;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
+import org.apache.accumulo.core.data.LoadPlan;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.file.FileOperations;
 import org.apache.accumulo.core.file.FileSKVIterator;
@@ -28,6 +32,7 @@ import org.apache.accumulo.core.file.rfile.RFile;
 import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
 import org.apache.accumulo.core.spi.crypto.CryptoService;
 import org.apache.accumulo.core.spi.file.rfile.compression.NoCompression;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.mutable.MutableInt;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -274,6 +279,21 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
             // don't bother if this writer has not been used yet
             if (filename != null) {
                 writer.close();
+
+                // TODO need to get tablet splits
+                SortedSet<Text> tableSplits = new TreeSet<>();
+                LoadPlan.SplitResolver splitResolver = LoadPlan.SplitResolver.from(tableSplits);
+
+                // compute the load plan for the rfile
+                String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
+
+                // TODO is filename a fully qualified path or is it only a filename?  If it is just a filename then none of this will work.
+                // TOOD the suffix replacement is sketchy, its not very robust
+                Path lpPath = new Path(filename.getParent(), filename.getName().replace(".rf", ".lp"));
+                try (var output = filename.getFileSystem(conf).create(lpPath, false)) {
+                    IOUtils.write(lpJson, output, UTF_8);
+                }
+
                 // pull the index off the filename
                 filename = removeFileCount(filename);
                 createAndRegisterWriter(key, table, filename, tableConfigs.get(table));
