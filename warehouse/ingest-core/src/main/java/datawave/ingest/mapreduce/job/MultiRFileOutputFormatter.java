@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
+import com.google.common.base.Preconditions;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
@@ -270,8 +271,7 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
         // compute the load plan for the rfile
         String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
 
-        // TODO is filename a fully qualified path or is it only a filename? If it is just a filename then none of this will work.
-        // TOOD the suffix replacement is sketchy, its not very robust
+        Preconditions.checkArgument(filename.getName().endsWith(".rf"), "Unexpected suffix %s", filename);
         Path lpPath = new Path(filename.getParent(), filename.getName().replace(".rf", ".lp"));
         try (var output = filename.getFileSystem(conf).create(lpPath, false)) {
             IOUtils.write(lpJson, output, UTF_8);
