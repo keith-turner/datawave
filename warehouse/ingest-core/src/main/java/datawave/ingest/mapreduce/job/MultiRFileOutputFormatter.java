@@ -262,6 +262,21 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
                         FileOperations.getInstance().newWriterBuilder().forFile(filename, fs, conf, cs).withTableConfiguration(tableConf).build());
     }
 
+    private void computeLoadPlan(Path filename, String table) throws IOException {
+        // TODO is this a subset of the tablets splits? if so how does that subset relate to the data in the file?
+        LoadPlan.SplitResolver splitResolver = LoadPlan.SplitResolver.from(getSplits(table));
+
+        // compute the load plan for the rfile
+        String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
+
+        // TODO is filename a fully qualified path or is it only a filename?  If it is just a filename then none of this will work.
+        // TOOD the suffix replacement is sketchy, its not very robust
+        Path lpPath = new Path(filename.getParent(), filename.getName().replace(".rf", ".lp"));
+        try (var output = filename.getFileSystem(conf).create(lpPath, false)) {
+            IOUtils.write(lpJson, output, UTF_8);
+        }
+    }
+
     /**
      * Close the current writer for the specified key, and create the next writer. The index encoded in the filename will be appropriately updated.
      *
@@ -282,18 +297,7 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
             if (filename != null) {
                 writer.close();
 
-                // TODO is this a subset of the tablets splits? if so how does that subset relate to the data in the file?
-                LoadPlan.SplitResolver splitResolver = LoadPlan.SplitResolver.from(getSplits(table));
-
-                // compute the load plan for the rfile
-                String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
-
-                // TODO is filename a fully qualified path or is it only a filename?  If it is just a filename then none of this will work.
-                // TOOD the suffix replacement is sketchy, its not very robust
-                Path lpPath = new Path(filename.getParent(), filename.getName().replace(".rf", ".lp"));
-                try (var output = filename.getFileSystem(conf).create(lpPath, false)) {
-                    IOUtils.write(lpJson, output, UTF_8);
-                }
+                computeLoadPlan(filename, table);
 
                 // pull the index off the filename
                 filename = removeFileCount(filename);
@@ -584,8 +588,12 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
             @Override
             public void close(TaskAttemptContext context) throws IOException, InterruptedException {
                 // Close all of the Map File Writers
-                for (SizeTrackingWriter writer : writers.values()) {
+                for (Map.Entry<String,SizeTrackingWriter> entry : writers.entrySet()) {
+                    var writer = entry.getValue();
+                    var tableName = writerTableNames.get(entry.getKey());
+                    var rfilePath = usedWriterPaths.get(entry.getKey());
                     writer.close();
+                    computeLoadPlan(rfilePath, tableName);
                 }
                 // To verify the file was actually written successfully, we need to reopen it which will reread
                 // the index at the end and verify its integrity.
