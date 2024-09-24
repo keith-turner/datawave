@@ -938,7 +938,7 @@ public final class BulkIngestMapFileLoader implements Runnable {
 
                 LoadPlan loadPlan = builder.build();
 
-                accumuloClient.tableOperations().importDirectory(tableDir.toString()).to(tableName).plan(loadPlan).load();
+                accumuloClient.tableOperations().importDirectory(tableDir.toString()).to(tableName).plan(loadPlan).ignoreEmptyDir(true).load();
                 log.info("Completed bringing map files online for " + tableName);
                 validateComplete();
             } catch (Exception e) {
