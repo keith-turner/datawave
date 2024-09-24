@@ -91,4 +91,14 @@
   <name>partitioner.default.delegate</name>
   <value>datawave.ingest.mapreduce.partition.MultiTableRRRangePartitioner</value>
 </property>
+
+<property>
+    <name>datawave.ingest.splits.cache.dir</name>
+    <value>${WAREHOUSE_HDFS_NAME_NODE}/data/splitsCache</value>
+</property>
+    
+<property>
+    <name>accumulo.config.cache.path</name>
+    <value>${WAREHOUSE_HDFS_NAME_NODE}/data/accumuloConfigCache/accConfCache.txt</value>
+</property>
 </configuration>
