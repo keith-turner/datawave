@@ -1016,7 +1016,7 @@ public final class BulkIngestMapFileLoader implements Runnable {
 
         private void validateComplete() throws IOException {
             FileSystem fileSystem = FileSystem.get(srcHdfs, new Configuration());
-            if (fileSystem.listStatus(tableDir, p->!p.getName().endsWith(".lp")).length > 0) {
+            if (fileSystem.listStatus(tableDir, p -> !p.getName().endsWith(".lp")).length > 0) {
                 log.fatal("Failed to completely import " + tableDir);
                 throw new IOException("Failed to completely import " + tableDir);
             }

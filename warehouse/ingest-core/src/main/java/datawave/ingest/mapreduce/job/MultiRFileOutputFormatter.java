@@ -1,6 +1,7 @@
 package datawave.ingest.mapreduce.job;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+
 import static org.apache.accumulo.core.conf.Property.TABLE_CRYPTO_PREFIX;
 
 import java.io.DataOutputStream;
@@ -269,7 +270,7 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
         // compute the load plan for the rfile
         String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
 
-        // TODO is filename a fully qualified path or is it only a filename?  If it is just a filename then none of this will work.
+        // TODO is filename a fully qualified path or is it only a filename? If it is just a filename then none of this will work.
         // TOOD the suffix replacement is sketchy, its not very robust
         Path lpPath = new Path(filename.getParent(), filename.getName().replace(".rf", ".lp"));
         try (var output = filename.getFileSystem(conf).create(lpPath, false)) {
@@ -593,7 +594,11 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
                     var tableName = writerTableNames.get(entry.getKey());
                     var rfilePath = usedWriterPaths.get(entry.getKey());
                     writer.close();
-                    computeLoadPlan(rfilePath, tableName);
+                    if (rfilePath != null && tableName != null) {
+                        computeLoadPlan(rfilePath, tableName);
+                    } else {
+                        log.info("Not computing load plan for " + entry.getKey() + " " + rfilePath + " " + tableName);
+                    }
                 }
                 // To verify the file was actually written successfully, we need to reopen it which will reread
                 // the index at the end and verify its integrity.
@@ -682,11 +687,12 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
         };
     }
 
-    private final Map<String, SortedSet<Text>> splitsCache = new HashMap<>();
+    private final Map<String,SortedSet<Text>> splitsCache = new HashMap<>();
 
     private SortedSet<Text> getSplits(String tableName) {
-        // TODO what are the implications of this cache on memory?  is there another cache below this?  want to avoid resorting the data on each request, not sure if this is useful though.
-        return splitsCache.computeIfAbsent(tableName, tn-> {
+        // TODO what are the implications of this cache on memory? is there another cache below this? want to avoid resorting the data on each request, not sure
+        // if this is useful though.
+        return splitsCache.computeIfAbsent(tableName, tn -> {
             try {
                 return new TreeSet<>(SplitsFile.getSplits(conf, tableName));
             } catch (IOException e) {
