@@ -2,6 +2,7 @@ package datawave.ingest.mapreduce.job;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.accumulo.core.conf.Property.TABLE_CRYPTO_PREFIX;
 
 import java.io.DataOutputStream;
@@ -17,6 +18,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Preconditions;
 import org.apache.accumulo.core.client.AccumuloException;
@@ -266,16 +268,22 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
 
     private void computeLoadPlan(Path filename, String table) throws IOException {
         // TODO is this a subset of the tablets splits? if so how does that subset relate to the data in the file?
+        long t1 = System.nanoTime();
         LoadPlan.SplitResolver splitResolver = LoadPlan.SplitResolver.from(getSplits(table));
+        long t2 = System.nanoTime();
 
         // compute the load plan for the rfile
         String lpJson = LoadPlan.compute(filename.toUri(), splitResolver).toJson();
+        long t3 = System.nanoTime();
 
         Preconditions.checkArgument(filename.getName().endsWith(".rf"), "Unexpected suffix %s", filename);
         Path lpPath = new Path(filename.getParent(), filename.getName().replace(".rf", ".lp"));
         try (var output = filename.getFileSystem(conf).create(lpPath, false)) {
             IOUtils.write(lpJson, output, UTF_8);
         }
+        long t4 = System.nanoTime();
+
+        log.info("Computed load plan for "+filename.getName()+" getSplits:"+ NANOSECONDS.toMillis(t2-t1)+"ms compute:"+ NANOSECONDS.toMillis(t3-t2)+"ms write:"+ NANOSECONDS.toMillis(t4-t3)+"ms");
     }
 
     /**
@@ -594,6 +602,7 @@ public class MultiRFileOutputFormatter extends FileOutputFormat<BulkIngestKey,Va
                     var tableName = writerTableNames.get(entry.getKey());
                     var rfilePath = usedWriterPaths.get(entry.getKey());
                     writer.close();
+                    // TODO these null checks were added to avoid NPE, however not sure it is safe to ingnore these when null... needs investigation
                     if (rfilePath != null && tableName != null) {
                         computeLoadPlan(rfilePath, tableName);
                     } else {
